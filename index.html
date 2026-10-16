@@ -132,6 +132,7 @@
               <span class="ma" style="color:#60a5fa">BOLL上</span>
               <span class="ma" style="color:#c084fc">MID</span>
               <span class="ma" style="color:#f6465d">BOLL下</span>
+              <span class="muted">(13,2)</span>
             </div>
             <div class="chart-actions">
               <button id="btn-back" class="btn-ghost sm">撤销</button>
@@ -264,10 +265,11 @@
         <li><strong>回放历史：</strong>系统从真实日线里截取一段区间，你只能看到「已经走出来」的 K 线。</li>
         <li><strong>随时买卖：</strong>按当前收盘价成交。支持部分仓位 —— 可以 1/4 仓试水，也可以分批加仓减仓。</li>
         <li><strong>做 T：</strong>默认 T+0，当日可以先卖后买、或先买后卖，用底仓做日内回转。T+1 模式下当日买入不可卖出。</li>
-        <li><strong>指标：</strong>默认 MA5/10/20；点 BOLL 可看布林带（20 日，±2 倍标准差）。下方还有大盘（样本等权指数）对照。</li>
+        <li><strong>指标：</strong>默认 MA5/10/20；点 BOLL 看布林带（13 日，±2σ）。悬停 K 线可看十字线与量价；买卖会在图上打点。下方还有大盘（样本等权指数）对照。</li>
         <li><strong>下一根：</strong>点「下一根」推进一天。限时竞速模式下每根 K 线只有 8 秒决策时间。</li>
         <li><strong>计分：</strong>得分 = 收益率 − 回撤惩罚 − 过度交易惩罚。追求收益的同时控制回撤，才是高手。</li>
         <li><strong>期末清仓：</strong>最后一根 K 线走完后系统会强制按收盘价清仓，并写入成交记录。</li>
+        <li><strong>随机盲猜：</strong>选「随机盲猜」后对局中不显示标的，结束后才揭晓。</li>
         <li><strong>撤销：</strong>经典/闪电/马拉松模式下可撤销上一步（买单、卖单或推进一日）。限时模式不可撤销。</li>
       </ol>
       <button class="btn-primary modal-close">知道了</button>

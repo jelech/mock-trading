@@ -17,12 +17,14 @@
     index: [],
     indexName: "样本等权指数",
     selectedCode: null,
+    blind: false, // 随机盲猜：对局中隐藏标的
     mode: "classic",
     days: 40,
     capital: 100000,
     rule: "t0",
     range: "random",
     indicator: "ma", // 'ma' | 'boll'
+    cross: null, // {x,y} mouse on kline
     // game
     engine: null,
     bars: [],
@@ -58,25 +60,42 @@
   // ---------- setup UI ----------
   function renderStockList() {
     const box = $("#stock-list");
-    box.innerHTML = state.stocks
-      .map(
-        (s, i) => `
-      <button class="stock-item${i === 0 ? " selected" : ""}" data-code="${s.code}">
+    const blindRow = `
+      <button class="stock-item blind-item${state.blind ? " selected" : ""}" data-code="__blind__">
+        <div>
+          <div class="name">🎲 随机盲猜</div>
+          <div class="code">对局中隐藏标的名，结束后揭晓</div>
+        </div>
+        <div class="range">神秘挑战</div>
+      </button>`;
+    box.innerHTML =
+      blindRow +
+      state.stocks
+        .map(
+          (s, i) => `
+      <button class="stock-item${!state.blind && i === 0 ? " selected" : ""}" data-code="${s.code}">
         <div>
           <div class="name">${s.name}</div>
           <div class="code">${s.code}</div>
         </div>
         <div class="range">${s.start} → ${s.end}<br/>${s.bars.length} 根</div>
       </button>`
-      )
-      .join("");
-    state.selectedCode = state.stocks[0].code;
+        )
+        .join("");
+    if (!state.blind) state.selectedCode = state.stocks[0].code;
 
     $$(".stock-item", box).forEach((btn) => {
       btn.addEventListener("click", () => {
         $$(".stock-item", box).forEach((b) => b.classList.remove("selected"));
         btn.classList.add("selected");
-        state.selectedCode = btn.dataset.code;
+        const code = btn.dataset.code;
+        if (code === "__blind__") {
+          state.blind = true;
+          state.selectedCode = null;
+        } else {
+          state.blind = false;
+          state.selectedCode = code;
+        }
       });
     });
   }
@@ -122,8 +141,15 @@
 
   // ---------- game ----------
   function startGame() {
-    const stock = state.stocks.find((s) => s.code === state.selectedCode);
+    let stock;
+    if (state.blind) {
+      stock = state.stocks[Math.floor(Math.random() * state.stocks.length)];
+    } else {
+      stock = state.stocks.find((s) => s.code === state.selectedCode);
+    }
     if (!stock) return;
+    // keep resolved code for scoring/reveal; hide UI when blind
+    state.activeCode = stock.code;
 
     const bars = stock.bars;
     const totalDays = Math.min(state.days, bars.length - 10);
@@ -155,11 +181,17 @@
     });
     state.snapshots = [];
     state.running = true;
+    state.cross = null;
 
     // UI labels
     const s = stock;
-    $("#g-stock-name").textContent = s.name;
-    $("#g-stock-code").textContent = s.code;
+    if (state.blind) {
+      $("#g-stock-name").textContent = "神秘标的";
+      $("#g-stock-code").textContent = "结束后揭晓";
+    } else {
+      $("#g-stock-name").textContent = s.name;
+      $("#g-stock-code").textContent = s.code;
+    }
     $("#g-day-total").textContent = String(totalDays);
     showScreen("screen-game");
 
@@ -241,9 +273,14 @@
 
     // charts
     const barsVis = visibleBars();
+    // trades that fall inside the visible window (by date)
+    const visDates = new Set(barsVis.map((b) => b.d));
+    const tradesVis = eng.trades.filter((t) => visDates.has(t.day));
     KChart.drawKline($("#chart"), barsVis, {
       showMA: state.indicator === "ma",
       showBOLL: state.indicator === "boll",
+      trades: tradesVis,
+      cross: state.cross,
     });
     // live equity series: keep daily marks but pin the last point to current MTM
     const eqSeries = eng.equityCurve.slice();
@@ -523,10 +560,18 @@
     gradeEl.textContent = result.grade;
     gradeEl.className = "result-grade " + result.grade.toLowerCase();
 
-    const stock = state.stocks.find((s) => s.code === state.selectedCode);
+    const stock = state.stocks.find((s) => s.code === state.activeCode);
+    if (state.blind && stock) {
+      $("#g-stock-name").textContent = stock.name;
+      $("#g-stock-code").textContent = stock.code;
+    }
+    const displayName = stock ? stock.name : "未知标的";
+    const displayCode = stock ? stock.code : "";
     $("#r-title").textContent =
       result.score >= 8 ? "操作漂亮！" : result.score >= 2 ? "稳中有进" : "继续磨练";
-    $("#r-subtitle").textContent = `${stock.name} · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日`;
+    $("#r-subtitle").textContent = state.blind
+      ? `揭晓：${displayName}（${displayCode}） · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日`
+      : `${displayName} · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日`;
 
     setMetric("#r-return", `${result.returnPct >= 0 ? "+" : ""}${result.returnPct.toFixed(2)}%`, result.returnPct);
     setMetric("#r-score", result.score.toFixed(2), result.score);
@@ -554,10 +599,10 @@
       `<br/>成交笔数 <code>${result.tradeCount}</code>（含期末清仓）`;
 
     saveScore({
-      name: stock.name,
-      code: stock.code,
+      name: state.blind ? `盲猜·${displayName}` : displayName,
+      code: displayCode,
       mode: state.mode,
-      modeLabel: MODE_LABEL[state.mode],
+      modeLabel: MODE_LABEL[state.mode] + (state.blind ? "·盲猜" : ""),
       days: challengeDayNumber(),
       returnPct: result.returnPct,
       score: result.score,
@@ -726,6 +771,52 @@
       } else if (e.key.toLowerCase() === "s") {
         doSell();
       }
+    });
+
+    // crosshair on K-line — only redraw the chart for smooth hover
+    const chartEl = $("#chart");
+    const redrawChartOnly = () => {
+      if (!state.engine) return;
+      const barsVis = visibleBars();
+      const visDates = new Set(barsVis.map((b) => b.d));
+      const tradesVis = state.engine.trades.filter((t) => visDates.has(t.day));
+      KChart.drawKline(chartEl, barsVis, {
+        showMA: state.indicator === "ma",
+        showBOLL: state.indicator === "boll",
+        trades: tradesVis,
+        cross: state.cross,
+      });
+    };
+    chartEl.addEventListener("mousemove", (e) => {
+      if (!state.engine) return;
+      const rect = chartEl.getBoundingClientRect();
+      state.cross = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+      redrawChartOnly();
+    });
+    chartEl.addEventListener("mouseleave", () => {
+      if (!state.cross) return;
+      state.cross = null;
+      redrawChartOnly();
+    });
+    chartEl.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!state.engine || !e.touches[0]) return;
+        const rect = chartEl.getBoundingClientRect();
+        state.cross = {
+          x: e.touches[0].clientX - rect.left,
+          y: e.touches[0].clientY - rect.top,
+        };
+        redrawChartOnly();
+      },
+      { passive: true }
+    );
+    chartEl.addEventListener("touchend", () => {
+      state.cross = null;
+      redrawChartOnly();
     });
 
     // redraw charts on resize
