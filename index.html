@@ -20,11 +20,6 @@
 
       <div class="setup-grid">
         <div class="panel">
-          <h2>选择标的</h2>
-          <div id="stock-list" class="stock-list"></div>
-        </div>
-
-        <div class="panel">
           <h2>挑战模式</h2>
           <div class="mode-list" id="mode-list">
             <button class="mode-card selected" data-mode="classic" data-days="40">
@@ -64,11 +59,35 @@
           </div>
 
           <div class="field-row">
-            <label>区间起点</label>
-            <div class="chip-group" id="range-group">
-              <button class="chip selected" data-value="random">随机</button>
-              <button class="chip" data-value="start">从头开始</button>
-            </div>
+            <label>标的抽取</label>
+            <p class="field-desc">每局从热门池随机抽取，对局中隐藏名称与代码，结束后揭晓。</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>行情环境</h2>
+          <div class="chip-group regime-group" id="regime-group">
+            <button class="chip selected" data-value="random">随机</button>
+            <button class="chip" data-value="bull">牛市</button>
+            <button class="chip" data-value="bear">熊市</button>
+            <button class="chip" data-value="side">震荡市</button>
+          </div>
+          <p id="regime-desc" class="field-desc">
+            从标的池中随机截取一段历史区间，不限涨跌节奏。
+          </p>
+
+          <div class="pool-box" id="pool-box">
+            <div class="pool-title">热门标的池</div>
+            <div id="pool-info" class="pool-info">加载中…</div>
+            <div id="regime-stats" class="regime-stats"></div>
+          </div>
+
+          <div class="field-row">
+            <label>区间说明</label>
+            <p class="field-desc">
+              系统按所选行情环境，在真实日线上匹配对应涨跌节奏的窗口。
+              牛市窗口区间涨幅显著为正，熊市显著为负，震荡市涨跌有限、来回拉锯。
+            </p>
           </div>
         </div>
       </div>
@@ -129,14 +148,15 @@
               <span class="ma ma20">MA20</span>
             </div>
             <div class="boll-legend hidden" id="boll-legend">
-              <span class="ma" style="color:#60a5fa">BOLL上</span>
-              <span class="ma" style="color:#c084fc">MID</span>
-              <span class="ma" style="color:#f6465d">BOLL下</span>
+              <span class="ma" style="color:#60a5fa">BOLL上 <b id="boll-up" class="ind-val">—</b></span>
+              <span class="ma" style="color:#c084fc">MID <b id="boll-mid" class="ind-val">—</b></span>
+              <span class="ma" style="color:#f6465d">BOLL下 <b id="boll-dn" class="ind-val">—</b></span>
               <span class="muted">(13,2)</span>
             </div>
             <div class="chart-actions">
               <button id="btn-back" class="btn-ghost sm">撤销</button>
               <button id="btn-next" class="btn-primary sm">下一根 ▶</button>
+              <button id="btn-settle" class="btn-primary sm hidden">查看结算</button>
             </div>
           </div>
           <canvas id="chart" width="1000" height="520"></canvas>
@@ -206,8 +226,21 @@
         </aside>
       </div>
 
+      <div id="review-banner" class="review-banner hidden">
+        <div class="review-text">
+          <strong>对局已结束</strong>
+          <span class="muted">已停止交易，可回看完整 K 线与操作记录</span>
+          <span id="review-summary" class="review-summary"></span>
+        </div>
+        <div class="review-actions">
+          <button id="btn-review-settle" class="btn-primary sm">查看结算</button>
+          <button id="btn-review-again" class="btn-ghost sm">再来一局</button>
+          <button id="btn-review-exit" class="btn-ghost sm">返回首页</button>
+        </div>
+      </div>
+
       <footer class="game-bottom">
-        <div class="log-title">交易记录</div>
+        <div class="log-title">交易记录 <span id="log-count" class="muted"></span></div>
         <div id="trade-log" class="trade-log empty">暂无成交</div>
       </footer>
     </section>
@@ -250,7 +283,8 @@
 
         <div class="result-actions">
           <button id="btn-again" class="btn-primary">再来一局</button>
-          <button id="btn-change" class="btn-ghost">换个标的</button>
+          <button id="btn-result-review" class="btn-ghost">回看操作</button>
+          <button id="btn-change" class="btn-ghost">返回首页</button>
           <button id="btn-result-board" class="btn-ghost">查看排行</button>
         </div>
       </div>
@@ -269,7 +303,9 @@
         <li><strong>下一根：</strong>点「下一根」推进一天。限时竞速模式下每根 K 线只有 8 秒决策时间。</li>
         <li><strong>计分：</strong>得分 = 收益率 − 回撤惩罚 − 过度交易惩罚。追求收益的同时控制回撤，才是高手。</li>
         <li><strong>期末清仓：</strong>最后一根 K 线走完后系统会强制按收盘价清仓，并写入成交记录。</li>
-        <li><strong>随机盲猜：</strong>选「随机盲猜」后对局中不显示标的，结束后才揭晓。</li>
+        <li><strong>结束后回看：</strong>对局结束后不会强制退出，可继续回看 K 线与完整交易记录；仅禁用买卖等操作按钮。点「查看结算」看评分，点「回看操作」还能回到盘面。</li>
+        <li><strong>行情环境：</strong>可选随机 / 牛市 / 熊市 / 震荡市，系统会匹配对应涨跌节奏的历史窗口。标的从热门池中自动抽取。</li>
+        <li><strong>隐藏标的：</strong>每局随机抽标的，对局中只显示「神秘标的」，结束后揭晓名称与代码。</li>
         <li><strong>撤销：</strong>经典/闪电/马拉松模式下可撤销上一步（买单、卖单或推进一日）。限时模式不可撤销。</li>
       </ol>
       <button class="btn-primary modal-close">知道了</button>
@@ -298,9 +334,9 @@
     </div>
   </div>
 
-  <script src="js/chart.js?v=20261016c"></script>
-  <script src="js/engine.js?v=20261016c"></script>
-  <script src="js/scoring.js?v=20261016c"></script>
-  <script src="js/app.js?v=20261016c"></script>
+  <script src="js/chart.js?v=20261016d"></script>
+  <script src="js/engine.js?v=20261016d"></script>
+  <script src="js/scoring.js?v=20261016d"></script>
+  <script src="js/app.js?v=20261016d"></script>
 </body>
 </html>

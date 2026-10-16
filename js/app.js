@@ -12,17 +12,32 @@
     marathon: "马拉松",
   };
 
+  const REGIME_LABEL = {
+    random: "随机行情",
+    bull: "牛市",
+    bear: "熊市",
+    side: "震荡市",
+  };
+
+  const REGIME_DESC = {
+    random: "从标的池中随机截取一段历史区间，不限涨跌节奏。",
+    bull: "只匹配区间明显上行的窗口，练习持股待涨与止盈。",
+    bear: "只匹配区间明显下行的窗口，练习止损、空仓与抢反弹。",
+    side: "只匹配涨跌有限、来回拉锯的窗口，练习高抛低吸做差价。",
+  };
+
   const state = {
     stocks: [],
     index: [],
     indexName: "样本等权指数",
-    selectedCode: null,
-    blind: false, // 随机盲猜：对局中隐藏标的
+    poolInfo: null,
+    regimeCounts: null,
+    blind: true, // 对局中始终隐藏标的名，结束后揭晓
     mode: "classic",
     days: 40,
     capital: 100000,
     rule: "t0",
-    range: "random",
+    regime: "random",
     indicator: "ma", // 'ma' | 'boll'
     cross: null, // {x,y} mouse on kline
     // game
@@ -36,6 +51,8 @@
     speedDeadline: 0,
     speedDuration: 8000,
     running: false,
+    finished: false, // 对局结束 → 回看模式
+    lastResult: null,
   };
 
   // ---------- boot ----------
@@ -43,13 +60,19 @@
     try {
       const res = await fetch("data/stocks.json");
       const data = await res.json();
-      state.stocks = data.stocks;
+      state.stocks = data.stocks || [];
       state.index = data.index || [];
       state.indexName = data.index_name || "样本等权指数";
-      renderStockList();
+      state.poolInfo = data.pool_info || null;
+      state.regimeCounts = data.regime_counts_40d || null;
+      renderPoolInfo();
+      renderRegimeDesc();
     } catch (err) {
-      $("#stock-list").innerHTML =
-        '<div class="board-empty">数据加载失败，请用本地服务器打开（python3 -m http.server）</div>';
+      const pool = $("#pool-info");
+      if (pool) {
+        pool.innerHTML =
+          '<div class="board-empty">数据加载失败，请用本地服务器打开（python3 -m http.server）</div>';
+      }
       console.error(err);
     }
     bindSetup();
@@ -58,46 +81,40 @@
   }
 
   // ---------- setup UI ----------
-  function renderStockList() {
-    const box = $("#stock-list");
-    const blindRow = `
-      <button class="stock-item blind-item${state.blind ? " selected" : ""}" data-code="__blind__">
-        <div>
-          <div class="name">🎲 随机盲猜</div>
-          <div class="code">对局中隐藏标的名，结束后揭晓</div>
-        </div>
-        <div class="range">神秘挑战</div>
-      </button>`;
-    box.innerHTML =
-      blindRow +
-      state.stocks
-        .map(
-          (s, i) => `
-      <button class="stock-item${!state.blind && i === 0 ? " selected" : ""}" data-code="${s.code}">
-        <div>
-          <div class="name">${s.name}</div>
-          <div class="code">${s.code}</div>
-        </div>
-        <div class="range">${s.start} → ${s.end}<br/>${s.bars.length} 根</div>
-      </button>`
-        )
-        .join("");
-    if (!state.blind) state.selectedCode = state.stocks[0].code;
+  function renderPoolInfo() {
+    const box = $("#pool-info");
+    const stats = $("#regime-stats");
+    if (!box) return;
+    if (!state.stocks.length) {
+      box.textContent = "标的池为空";
+      return;
+    }
+    const info = state.poolInfo || {};
+    const dMin = info.date_min || state.stocks[0].start;
+    const dMax = info.date_max || state.stocks[0].end;
+    const barsMin = Math.min(...state.stocks.map((s) => s.bars.length));
+    const barsMax = Math.max(...state.stocks.map((s) => s.bars.length));
+    box.innerHTML = `
+      <div class="pool-line"><span>数量</span><strong>${state.stocks.length} 只热门标的</strong></div>
+      <div class="pool-line"><span>区间</span><strong>${dMin} → ${dMax}</strong></div>
+      <div class="pool-line"><span>K线</span><strong>约 ${barsMin}–${barsMax} 根 / 股</strong></div>
+      <div class="pool-line"><span>指数</span><strong>${state.indexName}</strong></div>
+    `;
+    if (stats && state.regimeCounts) {
+      const c = state.regimeCounts;
+      const total = (c.bull || 0) + (c.bear || 0) + (c.side || 0);
+      stats.innerHTML = `
+        <span class="regime-pill bull">牛市窗口 ${c.bull || 0}</span>
+        <span class="regime-pill bear">熊市 ${c.bear || 0}</span>
+        <span class="regime-pill side">震荡 ${c.side || 0}</span>
+        <span class="muted">共约 ${total} 个可截取窗口</span>
+      `;
+    }
+  }
 
-    $$(".stock-item", box).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        $$(".stock-item", box).forEach((b) => b.classList.remove("selected"));
-        btn.classList.add("selected");
-        const code = btn.dataset.code;
-        if (code === "__blind__") {
-          state.blind = true;
-          state.selectedCode = null;
-        } else {
-          state.blind = false;
-          state.selectedCode = code;
-        }
-      });
-    });
+  function renderRegimeDesc() {
+    const el = $("#regime-desc");
+    if (el) el.textContent = REGIME_DESC[state.regime] || REGIME_DESC.random;
   }
 
   function bindChipGroup(groupId, onPick) {
@@ -127,8 +144,9 @@
     bindChipGroup("#rule-group", (chip) => {
       state.rule = chip.dataset.value;
     });
-    bindChipGroup("#range-group", (chip) => {
-      state.range = chip.dataset.value;
+    bindChipGroup("#regime-group", (chip) => {
+      state.regime = chip.dataset.value;
+      renderRegimeDesc();
     });
 
     $("#btn-start").addEventListener("click", startGame);
@@ -139,39 +157,86 @@
     });
   }
 
+  // ---------- window / regime ----------
+  function classifyWindow(bars, startIdx, days) {
+    const j = Math.min(startIdx + days - 1, bars.length - 1);
+    if (j <= startIdx) return "side";
+    const r = (bars[j].c / bars[startIdx].c - 1) * 100;
+    const thr = 6 + 0.12 * days;
+    if (r >= thr) return "bull";
+    if (r <= -thr) return "bear";
+    return "side";
+  }
+
+  function pickChallengeWindow(stock, totalDays, regime, warmup) {
+    const bars = stock.bars;
+    const minStart = warmup;
+    const maxStart = bars.length - totalDays - 1;
+    if (maxStart < minStart) return null;
+
+    const candidates = [];
+    const step = Math.max(1, Math.floor((maxStart - minStart + 1) / 24));
+    for (let i = minStart; i <= maxStart; i += step) {
+      candidates.push(i);
+    }
+    if (!candidates.includes(maxStart)) candidates.push(maxStart);
+    if (!candidates.includes(minStart)) candidates.unshift(minStart);
+
+    if (regime !== "random") {
+      const matched = candidates.filter(
+        (i) => classifyWindow(bars, i, totalDays) === regime
+      );
+      if (matched.length) {
+        return matched[Math.floor(Math.random() * matched.length)];
+      }
+      return null;
+    }
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  function resolveGameWindow(totalDays, warmup) {
+    const regime = state.regime;
+    const attempts = 80;
+    const pool = state.stocks.slice();
+    // shuffle
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+
+    let fallback = null;
+    for (let a = 0; a < attempts; a++) {
+      const stock = pool[a % pool.length];
+      const days = Math.min(totalDays, stock.bars.length - warmup - 2);
+      if (days < 5) continue;
+      const startIdx = pickChallengeWindow(stock, days, regime, warmup);
+      if (startIdx == null) continue;
+      const label = classifyWindow(stock.bars, startIdx, days);
+      const found = { stock, startIdx, days, label };
+      if (regime === "random" || label === regime) return found;
+      if (!fallback) fallback = found;
+    }
+    return fallback;
+  }
+
   // ---------- game ----------
   function startGame() {
-    let stock;
-    if (state.blind) {
-      stock = state.stocks[Math.floor(Math.random() * state.stocks.length)];
-    } else {
-      stock = state.stocks.find((s) => s.code === state.selectedCode);
+    const warmup = 25;
+    const totalDays = state.days;
+    const hit = resolveGameWindow(totalDays, warmup);
+    if (!hit) {
+      alert("未能匹配到合适的行情区间，试试换成「随机」或其他行情环境");
+      return;
     }
-    if (!stock) return;
-    // keep resolved code for scoring/reveal; hide UI when blind
+    const stock = hit.stock;
     state.activeCode = stock.code;
 
     const bars = stock.bars;
-    const totalDays = Math.min(state.days, bars.length - 10);
-    if (totalDays < 5) {
-      alert("该标的数据太短，无法开局");
-      return;
-    }
-
-    // window: need room for MA warmup before start
-    const warmup = 25;
-    let startIdx;
-    if (state.range === "start") {
-      startIdx = warmup;
-    } else {
-      const minStart = warmup;
-      const maxStart = bars.length - totalDays - 1;
-      startIdx = minStart + Math.floor(Math.random() * Math.max(1, maxStart - minStart + 1));
-    }
-    // reveal includes warmup for MA
+    const startIdx = hit.startIdx;
+    const days = hit.days;
     const revealFrom = Math.max(0, startIdx - warmup);
-    state.bars = bars.slice(revealFrom, startIdx + totalDays);
-    state.startIdx = warmup; // index within state.bars where challenge starts
+    state.bars = bars.slice(revealFrom, startIdx + days);
+    state.startIdx = warmup;
     state.cursor = state.startIdx;
     state.endIdx = state.bars.length - 1;
 
@@ -181,21 +246,21 @@
     });
     state.snapshots = [];
     state.running = true;
+    state.finished = false;
+    state.lastResult = null;
     state.cross = null;
+    state.windowRegime = hit.label;
 
-    // UI labels
-    const s = stock;
-    if (state.blind) {
-      $("#g-stock-name").textContent = "神秘标的";
-      $("#g-stock-code").textContent = "结束后揭晓";
-    } else {
-      $("#g-stock-name").textContent = s.name;
-      $("#g-stock-code").textContent = s.code;
-    }
-    $("#g-day-total").textContent = String(totalDays);
+    // 对局中始终隐藏标的，只在结算/揭晓时显示
+    $("#g-stock-name").textContent = "神秘标的";
+    $("#g-stock-code").textContent = "结束后揭晓";
+    $("#g-day-total").textContent = String(days);
+
+    // review banner / trade controls
+    setReviewMode(false);
+
     showScreen("screen-game");
 
-    // timer visibility
     const isSpeed = state.mode === "speed";
     $("#g-timer").classList.toggle("hidden", !isSpeed);
     $("#btn-back").classList.toggle("hidden", isSpeed);
@@ -209,7 +274,10 @@
   }
 
   function visibleBars() {
-    // show some pre-challenge context + played days
+    // review: show the whole session; live: sliding window with context
+    if (state.finished) {
+      return state.bars.slice(Math.max(0, state.startIdx - 30), state.endIdx + 1);
+    }
     const from = Math.max(0, state.cursor - 79);
     return state.bars.slice(from, state.cursor + 1);
   }
@@ -227,7 +295,11 @@
         : state.bars[state.startIdx - 1] || bar;
 
     $("#g-day").textContent = String(challengeDayNumber());
-    $("#g-date").textContent = bar.d;
+    const dateEl = $("#g-date");
+    const regimeTag = state.windowRegime
+      ? ` · ${REGIME_LABEL[state.windowRegime] || state.windowRegime}`
+      : "";
+    dateEl.textContent = bar.d + regimeTag;
     $("#t-price").textContent = bar.c.toFixed(2);
 
     const chg = ((bar.c - prev.c) / prev.c) * 100;
@@ -289,6 +361,7 @@
     else eqSeries[eqSeries.length - 1] = curEq;
     KChart.drawEquity($("#equity-chart"), eqSeries, eng.initialCash);
     renderIndexStrip(barsVis);
+    updateIndLegend(barsVis);
 
     renderLog();
     renderHint();
@@ -352,9 +425,37 @@
     return ((e - s) / s) * 100;
   }
 
+  function updateIndLegend(barsVis) {
+    if (!barsVis || !barsVis.length) return;
+    // Prefer the crosshair bar; otherwise the latest visible bar.
+    let idx = barsVis.length - 1;
+    if (state.cross) {
+      const chartEl = $("#chart");
+      const k = chartEl && chartEl.__kchart;
+      const padL = (k && k.padL) || 56;
+      const slot = (k && k.slot) || 0;
+      if (slot > 0 && state.cross.x != null) {
+        idx = Math.min(barsVis.length - 1, Math.max(0, Math.floor((state.cross.x - padL) / slot)));
+      }
+    }
+    const closes = barsVis.map((b) => b.c);
+    const bb = KChart.bollinger(closes, KChart.BOLL_PERIOD, KChart.BOLL_MULT);
+    const fmt = (v) => (v == null || Number.isNaN(v) ? "—" : v.toFixed(2));
+    const up = $("#boll-up");
+    const mid = $("#boll-mid");
+    const dn = $("#boll-dn");
+    if (up) up.textContent = fmt(bb.up[idx]);
+    if (mid) mid.textContent = fmt(bb.mid[idx]);
+    if (dn) dn.textContent = fmt(bb.dn[idx]);
+  }
+
   function renderLog() {
     const box = $("#trade-log");
     const trades = state.engine.trades;
+    const countEl = $("#log-count");
+    if (countEl) {
+      countEl.textContent = trades.length ? `· ${trades.length} 笔` : "";
+    }
     if (!trades.length) {
       box.className = "trade-log empty";
       box.textContent = "暂无成交";
@@ -409,7 +510,7 @@
   }
 
   function nextDay() {
-    if (!state.running) return;
+    if (!state.running || state.finished) return;
     if (state.cursor >= state.endIdx) {
       endGame();
       return;
@@ -424,7 +525,7 @@
   }
 
   function undoStep() {
-    if (!state.running || state.mode === "speed") return;
+    if (!state.running || state.finished || state.mode === "speed") return;
     if (!state.snapshots.length) {
       renderHint("没有可撤销的步骤", "warn");
       return;
@@ -437,6 +538,7 @@
   }
 
   function doBuy() {
+    if (!state.running || state.finished) return;
     const bar = currentBar();
     const qty = parseInt($("#t-qty").value, 10);
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -455,6 +557,7 @@
   }
 
   function doSell() {
+    if (!state.running || state.finished) return;
     const bar = currentBar();
     const qty = parseInt($("#t-qty").value, 10);
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -529,33 +632,42 @@
     }
   }
 
-  // ---------- end / result ----------
-  function endGame() {
-    stopSpeedClock();
-    state.running = false;
+  function setReviewMode(on) {
+    state.finished = on;
+    const screen = $("#screen-game");
+    if (screen) screen.classList.toggle("review", on);
+    const banner = $("#review-banner");
+    if (banner) banner.classList.toggle("hidden", !on);
 
-    // Force-close remaining positions at last close so win-rate / realized PnL are complete
-    const lastBar = currentBar();
-    const eng = state.engine;
-    if (eng.shares > 0) {
-      const prevRule = eng.rule;
-      eng.rule = "t0"; // allow closing even same-day lots at game end
-      const qty = eng.shares;
-      const result = eng.sell(qty, lastBar.c, lastBar.d);
-      eng.rule = prevRule;
-      if (result.ok) {
-        eng.trades[eng.trades.length - 1].note = "期末清仓";
-      }
-    }
-    state.engine.markEquity(lastBar.c);
-
-    const result = Scoring.scoreGame({
-      equityCurve: state.engine.equityCurve,
-      initialCash: state.engine.initialCash,
-      trades: state.engine.trades,
+    const dis = (sel, disabled) => {
+      const el = $(sel);
+      if (el) el.disabled = disabled;
+    };
+    dis("#btn-buy", on);
+    dis("#btn-sell", on);
+    dis("#btn-flatten", on);
+    dis("#btn-next", on);
+    dis("#btn-back", on);
+    dis("#t-qty", on);
+    $$("#qty-preset .chip").forEach((c) => {
+      c.disabled = on;
     });
 
-    // grade class
+    const settle = $("#btn-settle");
+    if (settle) settle.classList.toggle("hidden", !on);
+    const nextBtn = $("#btn-next");
+    if (nextBtn) nextBtn.classList.toggle("hidden", on);
+    const backBtn = $("#btn-back");
+    if (backBtn && on) backBtn.classList.add("hidden");
+
+    if (on) {
+      stopSpeedClock();
+      const t = $("#g-timer");
+      if (t) t.classList.add("hidden");
+    }
+  }
+
+  function fillResultScreen(result) {
     const gradeEl = $("#r-grade");
     gradeEl.textContent = result.grade;
     gradeEl.className = "result-grade " + result.grade.toLowerCase();
@@ -569,9 +681,12 @@
     const displayCode = stock ? stock.code : "";
     $("#r-title").textContent =
       result.score >= 8 ? "操作漂亮！" : result.score >= 2 ? "稳中有进" : "继续磨练";
+    const regimeTxt = state.windowRegime
+      ? ` · ${REGIME_LABEL[state.windowRegime] || ""}`
+      : "";
     $("#r-subtitle").textContent = state.blind
-      ? `揭晓：${displayName}（${displayCode}） · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日`
-      : `${displayName} · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日`;
+      ? `揭晓：${displayName}（${displayCode}） · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日${regimeTxt}`
+      : `${displayName} · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日${regimeTxt}`;
 
     setMetric("#r-return", `${result.returnPct >= 0 ? "+" : ""}${result.returnPct.toFixed(2)}%`, result.returnPct);
     setMetric("#r-score", result.score.toFixed(2), result.score);
@@ -597,12 +712,62 @@
       result.breakdown.join("<br/>") +
       alpha +
       `<br/>成交笔数 <code>${result.tradeCount}</code>（含期末清仓）`;
+  }
 
+  function enterReviewBanner(result) {
+    const el = $("#review-summary");
+    if (el) {
+      const ret = result.returnPct;
+      el.innerHTML = `收益 <code class="${ret >= 0 ? "up" : "down"}">${ret >= 0 ? "+" : ""}${ret.toFixed(2)}%</code> · 得分 <code>${result.score.toFixed(2)}</code> · ${result.grade} 级`;
+    }
+  }
+
+  // ---------- end / result ----------
+  function endGame() {
+    if (state.finished) {
+      // already finished — just (re)show settlement
+      if (state.lastResult) fillResultScreen(state.lastResult);
+      showScreen("screen-result");
+      return;
+    }
+    stopSpeedClock();
+    state.running = false;
+
+    // Force-close remaining positions at last close so win-rate / realized PnL are complete
+    const lastBar = currentBar();
+    const eng = state.engine;
+    if (eng.shares > 0) {
+      const prevRule = eng.rule;
+      eng.rule = "t0"; // allow closing even same-day lots at game end
+      const qty = eng.shares;
+      const result = eng.sell(qty, lastBar.c, lastBar.d);
+      eng.rule = prevRule;
+      if (result.ok) {
+        eng.trades[eng.trades.length - 1].note = "期末清仓";
+      }
+    }
+    state.engine.markEquity(lastBar.c);
+
+    const result = Scoring.scoreGame({
+      equityCurve: state.engine.equityCurve,
+      initialCash: state.engine.initialCash,
+      trades: state.engine.trades,
+    });
+    state.lastResult = result;
+
+    const stock = state.stocks.find((s) => s.code === state.activeCode);
+    const displayName = stock ? stock.name : "未知标的";
+    const displayCode = stock ? stock.code : "";
+    // 结束后揭晓标的
+    if (stock) {
+      $("#g-stock-name").textContent = stock.name;
+      $("#g-stock-code").textContent = stock.code;
+    }
     saveScore({
-      name: state.blind ? `盲猜·${displayName}` : displayName,
+      name: `盲猜·${displayName}`,
       code: displayCode,
       mode: state.mode,
-      modeLabel: MODE_LABEL[state.mode] + (state.blind ? "·盲猜" : ""),
+      modeLabel: MODE_LABEL[state.mode] + "·盲猜",
       days: challengeDayNumber(),
       returnPct: result.returnPct,
       score: result.score,
@@ -610,7 +775,11 @@
       date: new Date().toISOString().slice(0, 10),
     });
 
-    showScreen("screen-result");
+    // Stay on the game screen in review mode: full chart + trade log remain,
+    // only further trading is disabled.
+    setReviewMode(true);
+    enterReviewBanner(result);
+    renderGame();
   }
 
   function setMetric(sel, text, signRef) {
@@ -712,6 +881,7 @@
     });
 
     $("#btn-flatten").addEventListener("click", () => {
+      if (!state.running || state.finished) return;
       const eng = state.engine;
       const qty = eng.sellableShares();
       if (qty <= 0) {
@@ -756,9 +926,47 @@
       openModal("modal-board");
     });
 
+    // review / settlement
+    const openSettle = () => {
+      if (state.lastResult) {
+        fillResultScreen(state.lastResult);
+        showScreen("screen-result");
+      } else {
+        endGame();
+        if (state.lastResult) {
+          fillResultScreen(state.lastResult);
+          showScreen("screen-result");
+        }
+      }
+    };
+    const settleBtns = ["#btn-settle", "#btn-review-settle"];
+    settleBtns.forEach((sel) => {
+      const el = $(sel);
+      if (el) el.addEventListener("click", openSettle);
+    });
+    const againBtn = $("#btn-review-again");
+    if (againBtn) againBtn.addEventListener("click", startGame);
+    const exitBtn = $("#btn-review-exit");
+    if (exitBtn) {
+      exitBtn.addEventListener("click", () => {
+        setReviewMode(false);
+        showScreen("screen-setup");
+      });
+    }
+    const resultReview = $("#btn-result-review");
+    if (resultReview) {
+      resultReview.addEventListener("click", () => {
+        setReviewMode(true);
+        if (state.lastResult) enterReviewBanner(state.lastResult);
+        showScreen("screen-game");
+        renderGame();
+      });
+    }
+
     // keyboard
     document.addEventListener("keydown", (e) => {
       if (!$("#screen-game").classList.contains("active")) return;
+      if (state.finished) return;
       if (e.target.tagName === "INPUT") return;
       if (e.key === "ArrowRight" || e.key === " ") {
         e.preventDefault();
@@ -803,6 +1011,7 @@
         trades: tradesVis,
         cross: state.cross,
       });
+      updateIndLegend(barsVis);
     };
 
     const updateCrossFromEvent = (e, sticky) => {

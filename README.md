@@ -8,11 +8,12 @@
 
 ## 玩法
 
-1. 选一个标的、一种模式（经典 / 闪电 / 限时竞速 / 马拉松）
-2. 系统从历史区间随机截取一段 K 线，只展示「已经走出来」的部分
+1. 选一种模式（经典 / 闪电 / 限时竞速 / 马拉松）和**行情环境**（随机 / 牛市 / 熊市 / 震荡）
+2. 系统从**热门标的池**自动抽取一只，并按所选行情环境匹配一段历史 K 线
 3. 按当前收盘价下单（买入 / 卖出，支持 1/4、1/2、3/4、全仓）
 4. 点「下一根」推进一天；限时模式每根只有 8 秒
-5. 最后一根走完后**系统强制按收盘价清仓**，进入结算
+5. 最后一根走完后系统强制按收盘价清仓，**停在盘面回看**（可看完整 K 线与交易记录），买卖按钮禁用
+6. 点「查看结算」看评分；点「回看操作」随时回到盘面
 
 计分：`得分 = 收益率 − 回撤惩罚 − 过度交易惩罚`，并给出相对大盘超额。
 
@@ -57,15 +58,44 @@ python3 -m http.server 8080
 
 若 Pages 已启用却 404，先确认根目录有 `index.html`，再等 1–2 分钟或在 Actions 里看 `pages build and deployment`。
 
-## 更新行情数据
+## 内置股票从哪来 / 怎么加新的
 
-原始 CSV 在 `vibe-trading/standalone/backtest/data/`（列名 `trade_date,open,high,low,close,volume`，列顺序可不同）：
+游戏不直接读行情接口，而是跑一个生成脚本把日线打包进 `data/stocks.json`。
 
-```bash
-python3 tools/build_data.py
+### 现状（热门池）
+
+`tools/build_data.py` 会从 akline 长表 CSV（`part_*.csv`，路径可用环境变量 `AKLINE_PARTS` 指定）里：
+
+1. 剔除 ST、停牌
+2. 按**成交额 + 近 120 日涨幅 + 波动率**做「火热」分层抽取（高成交龙头 + 高人气涨幅 + 高波动）
+3. 写出 `data/stocks.json`（个股 K 线 + 样本等权指数 + 牛/熊/震荡窗口统计）
+
+首页不再选标的：开局时从池中**随机抽一只**，再按你选的行情环境匹配区间。
+
+### 添加你自己的股票
+
+**方式 A（推荐，单只补充）**  
+把日线 CSV 放到 `data/raw/`，文件名 = 代码，例如 `600519.SH.csv`：
+
+```csv
+trade_date,open,high,low,close,volume
+2026-01-02,1400.1,1420.0,1390.2,1410.5,12345678
 ```
 
-会重新生成 `data/stocks.json`（含个股 + 样本等权指数）。名称映射在 `tools/build_data.py` 的 `NAMES`。
+**方式 B（批量）**  
+设置环境变量 `AKLINE_PARTS` 指向你的长表目录（列含 `code, code_name, trade_date, open, high, low, close, volume, amount, isST, tradestatus`）：
+
+然后重建：
+
+```bash
+python3 tools/build_data.py --top 40 --min-bars 90
+# 本地预览
+python3 -m http.server 8080
+```
+
+- `--top N`：池子保留 N 只（默认 40）
+- `--min-bars`：最少 K 线根数（开局需要约 85 根：25 预热 + 60 日马拉松）
+- 自定义名称也可写进 `tools/build_data.py` 的 `NAMES` 字典
 
 ## 目录
 
@@ -75,8 +105,9 @@ css/style.css       # 深色交易终端风格 + 手机端一页布局
 js/chart.js         # Canvas K线 / MA / BOLL / 净值 / 大盘
 js/engine.js        # 账户 / 分批持仓 / T+0·T+1 / 手续费
 js/scoring.js       # 计分与评级
-js/app.js           # 流程、UI、本地排行榜
-data/stocks.json    # 行情数据
+js/app.js           # 流程、行情环境匹配、回看模式、本地排行榜
+data/stocks.json    # 行情数据（热门池 + 指数）
+data/raw/           # 自定义个股 CSV（可选）
 tools/build_data.py # CSV → JSON
 ```
 
@@ -86,6 +117,9 @@ tools/build_data.py # CSV → JSON
 - **做 T**：默认 T+0；可切 T+1
 - **手续费**：佣金 + 卖出印花税
 - **风险计分**：回撤、过度交易都会扣分
+- **行情环境**：牛市 / 熊市 / 震荡市窗口匹配
+- **热门标的池**：自动抽取，首页不选票
+- **结束后回看**：不强制退出，盘面 + 交易记录可复查
 - **BOLL / 大盘对照**：看相对强弱
 - **期末强平**：按最后收盘清仓，胜率与已实现盈亏完整
 - **限时竞速**：每根 8 秒，练盘感
