@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="K线竞技场 — 历史行情回放交易练习游戏" />
+  <title>K线竞技场 · 历史盘练习</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B0F14'/%3E%3Cpath d='M8 22V10M8 22h16M12 18V14M16 20V8M20 16V12' stroke='%2322D3EE' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <div id="app">
+    <!-- ============ SETUP ============ -->
+    <section id="screen-setup" class="screen active">
+      <header class="hero">
+        <div class="hero-badge">HISTORICAL REPLAY</div>
+        <h1>K线竞技场</h1>
+        <p class="hero-sub">在真实历史行情里练习买卖。可做T、可加减仓，比单纯满仓进出更接近实战。</p>
+      </header>
+
+      <div class="setup-grid">
+        <div class="panel">
+          <h2>选择标的</h2>
+          <div id="stock-list" class="stock-list"></div>
+        </div>
+
+        <div class="panel">
+          <h2>挑战模式</h2>
+          <div class="mode-list" id="mode-list">
+            <button class="mode-card selected" data-mode="classic" data-days="40">
+              <div class="mode-name">经典赛</div>
+              <div class="mode-desc">40 个交易日 · 从容决策</div>
+            </button>
+            <button class="mode-card" data-mode="sprint" data-days="15">
+              <div class="mode-name">闪电赛</div>
+              <div class="mode-desc">15 个交易日 · 快进快出</div>
+            </button>
+            <button class="mode-card" data-mode="speed" data-days="30">
+              <div class="mode-name">限时竞速</div>
+              <div class="mode-desc">30 日 · 每根 K 线限时 8 秒</div>
+            </button>
+            <button class="mode-card" data-mode="marathon" data-days="60">
+              <div class="mode-name">马拉松</div>
+              <div class="mode-desc">60 个交易日 · 考验持仓耐心</div>
+            </button>
+          </div>
+
+          <div class="field-row">
+            <label>初始资金</label>
+            <div class="chip-group" id="capital-group">
+              <button class="chip" data-value="50000">5 万</button>
+              <button class="chip selected" data-value="100000">10 万</button>
+              <button class="chip" data-value="200000">20 万</button>
+              <button class="chip" data-value="500000">50 万</button>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <label>交易规则</label>
+            <div class="chip-group" id="rule-group">
+              <button class="chip selected" data-value="t0">T+0 当日回转</button>
+              <button class="chip" data-value="t1">T+1（更接近 A 股）</button>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <label>区间起点</label>
+            <div class="chip-group" id="range-group">
+              <button class="chip selected" data-value="random">随机</button>
+              <button class="chip" data-value="start">从头开始</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-footer">
+        <button id="btn-start" class="btn-primary btn-xl">开始挑战</button>
+        <button id="btn-howto" class="btn-ghost">玩法说明</button>
+        <button id="btn-board" class="btn-ghost">本地排行</button>
+      </div>
+    </section>
+
+    <!-- ============ GAME ============ -->
+    <section id="screen-game" class="screen">
+      <header class="game-top">
+        <div class="top-left">
+          <button id="btn-quit" class="btn-ghost sm">退出</button>
+          <div class="stock-label">
+            <span id="g-stock-name">—</span>
+            <span id="g-stock-code" class="muted">—</span>
+          </div>
+        </div>
+        <div class="top-center">
+          <div class="day-pill">
+            <span class="muted">第</span>
+            <strong id="g-day">1</strong>
+            <span class="muted">/</span>
+            <span id="g-day-total">40</span>
+            <span class="muted">日</span>
+          </div>
+          <div id="g-date" class="muted">—</div>
+        </div>
+        <div class="top-right">
+          <div class="equity-block">
+            <div class="muted">总资产</div>
+            <div id="g-equity" class="equity-val">100,000</div>
+            <div id="g-pnl" class="pnl-val">0.00%</div>
+          </div>
+          <div id="g-timer" class="timer hidden" aria-label="剩余时间">
+            <svg viewBox="0 0 36 36" class="timer-ring">
+              <circle cx="18" cy="18" r="15" class="timer-bg"></circle>
+              <circle cx="18" cy="18" r="15" class="timer-fg" id="timer-fg"></circle>
+            </svg>
+            <span id="g-timer-num">8</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="game-body">
+        <div class="chart-wrap panel">
+          <div class="chart-toolbar">
+            <div class="ind-toggles">
+              <button class="ind-chip selected" id="ind-ma" data-ind="ma">MA</button>
+              <button class="ind-chip" id="ind-boll" data-ind="boll">BOLL</button>
+            </div>
+            <div class="ma-legend" id="ma-legend">
+              <span class="ma ma5">MA5</span>
+              <span class="ma ma10">MA10</span>
+              <span class="ma ma20">MA20</span>
+            </div>
+            <div class="boll-legend hidden" id="boll-legend">
+              <span class="ma" style="color:#60a5fa">BOLL上</span>
+              <span class="ma" style="color:#c084fc">MID</span>
+              <span class="ma" style="color:#f6465d">BOLL下</span>
+            </div>
+            <div class="chart-actions">
+              <button id="btn-back" class="btn-ghost sm">撤销</button>
+              <button id="btn-next" class="btn-primary sm">下一根 ▶</button>
+            </div>
+          </div>
+          <canvas id="chart" width="1000" height="520"></canvas>
+          <div class="strip-row">
+            <canvas id="equity-chart" width="1000" height="80"></canvas>
+            <canvas id="index-chart" width="1000" height="72"></canvas>
+          </div>
+          <div class="index-bar">
+            <span class="muted" id="index-name">样本等权指数</span>
+            <strong id="index-val">—</strong>
+            <span id="index-chg" class="pnl-val">—</span>
+            <span class="muted" id="index-window">区间 <b id="index-win-chg">—</b></span>
+          </div>
+        </div>
+
+        <aside class="side">
+          <div class="panel trade-panel">
+            <h3>下单</h3>
+            <div class="price-row">
+              <div>
+                <div class="muted">现价（收盘）</div>
+                <div id="t-price" class="price-big">—</div>
+              </div>
+              <div class="text-right">
+                <div class="muted">今日涨跌</div>
+                <div id="t-change" class="price-chg">—</div>
+              </div>
+            </div>
+
+            <div class="pos-bar">
+              <div class="muted">仓位</div>
+              <div class="pos-track"><div id="pos-fill" class="pos-fill"></div></div>
+              <div id="pos-text" class="pos-text">空仓 0%</div>
+            </div>
+
+            <div class="qty-row">
+              <label>数量（股）</label>
+              <input id="t-qty" type="number" min="100" step="100" value="100" />
+            </div>
+            <div class="chip-group tight" id="qty-preset">
+              <button class="chip" data-pct="0.25">1/4</button>
+              <button class="chip" data-pct="0.5">1/2</button>
+              <button class="chip" data-pct="0.75">3/4</button>
+              <button class="chip" data-pct="1">全仓</button>
+            </div>
+
+            <div class="buy-sell">
+              <button id="btn-buy" class="btn-buy">买入</button>
+              <button id="btn-sell" class="btn-sell">卖出</button>
+            </div>
+            <button id="btn-flatten" class="btn-ghost flatten">一键清仓</button>
+            <div id="trade-hint" class="hint"></div>
+          </div>
+
+          <div class="panel account-panel">
+            <h3>账户</h3>
+            <dl class="kv">
+              <div><dt>现金</dt><dd id="a-cash">—</dd></div>
+              <div><dt>持仓</dt><dd id="a-shares">0 股</dd></div>
+              <div><dt>成本</dt><dd id="a-cost">—</dd></div>
+              <div><dt>市值</dt><dd id="a-mv">—</dd></div>
+              <div><dt>浮动盈亏</dt><dd id="a-float">—</dd></div>
+              <div><dt>已实现</dt><dd id="a-realized">—</dd></div>
+              <div><dt>今日已交易</dt><dd id="a-day-trades">0 次</dd></div>
+            </dl>
+          </div>
+        </aside>
+      </div>
+
+      <footer class="game-bottom">
+        <div class="log-title">交易记录</div>
+        <div id="trade-log" class="trade-log empty">暂无成交</div>
+      </footer>
+    </section>
+
+    <!-- ============ RESULT ============ -->
+    <section id="screen-result" class="screen">
+      <div class="result-card panel">
+        <div class="result-grade" id="r-grade">A</div>
+        <h2 id="r-title">挑战完成</h2>
+        <div id="r-subtitle" class="muted">—</div>
+
+        <div class="result-metrics">
+          <div class="metric">
+            <div class="muted">总收益率</div>
+            <div id="r-return" class="metric-val">—</div>
+          </div>
+          <div class="metric">
+            <div class="muted">综合得分</div>
+            <div id="r-score" class="metric-val">—</div>
+          </div>
+          <div class="metric">
+            <div class="muted">最大回撤</div>
+            <div id="r-dd" class="metric-val">—</div>
+          </div>
+          <div class="metric">
+            <div class="muted">同期大盘</div>
+            <div id="r-index" class="metric-val">—</div>
+          </div>
+          <div class="metric">
+            <div class="muted">胜率</div>
+            <div id="r-winrate" class="metric-val">—</div>
+          </div>
+          <div class="metric">
+            <div class="muted">期末资产</div>
+            <div id="r-equity" class="metric-val">—</div>
+          </div>
+        </div>
+
+        <div class="result-breakdown" id="r-breakdown"></div>
+
+        <div class="result-actions">
+          <button id="btn-again" class="btn-primary">再来一局</button>
+          <button id="btn-change" class="btn-ghost">换个标的</button>
+          <button id="btn-result-board" class="btn-ghost">查看排行</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Modals -->
+  <div id="modal-howto" class="modal">
+    <div class="modal-card panel">
+      <h2>玩法说明</h2>
+      <ol class="howto-list">
+        <li><strong>回放历史：</strong>系统从真实日线里截取一段区间，你只能看到「已经走出来」的 K 线。</li>
+        <li><strong>随时买卖：</strong>按当前收盘价成交。支持部分仓位 —— 可以 1/4 仓试水，也可以分批加仓减仓。</li>
+        <li><strong>做 T：</strong>默认 T+0，当日可以先卖后买、或先买后卖，用底仓做日内回转。T+1 模式下当日买入不可卖出。</li>
+        <li><strong>指标：</strong>默认 MA5/10/20；点 BOLL 可看布林带（20 日，±2 倍标准差）。下方还有大盘（样本等权指数）对照。</li>
+        <li><strong>下一根：</strong>点「下一根」推进一天。限时竞速模式下每根 K 线只有 8 秒决策时间。</li>
+        <li><strong>计分：</strong>得分 = 收益率 − 回撤惩罚 − 过度交易惩罚。追求收益的同时控制回撤，才是高手。</li>
+        <li><strong>期末清仓：</strong>最后一根 K 线走完后系统会强制按收盘价清仓，并写入成交记录。</li>
+        <li><strong>撤销：</strong>经典/闪电/马拉松模式下可撤销上一步（买单、卖单或推进一日）。限时模式不可撤销。</li>
+      </ol>
+      <button class="btn-primary modal-close">知道了</button>
+    </div>
+  </div>
+
+  <div id="modal-board" class="modal">
+    <div class="modal-card panel">
+      <h2>本地排行榜</h2>
+      <div id="board-list" class="board-list"></div>
+      <div class="modal-actions">
+        <button id="btn-clear-board" class="btn-ghost">清空记录</button>
+        <button class="btn-primary modal-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-confirm" class="modal">
+    <div class="modal-card panel">
+      <h2 id="confirm-title">确认</h2>
+      <p id="confirm-text">确定要退出本局吗？</p>
+      <div class="modal-actions">
+        <button id="btn-confirm-cancel" class="btn-ghost">取消</button>
+        <button id="btn-confirm-ok" class="btn-primary">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/chart.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/scoring.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

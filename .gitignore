@@ -1,0 +1,3 @@
+preview-*.png
+.playwright-cli/
+.DS_Store
