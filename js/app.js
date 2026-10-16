@@ -773,8 +773,25 @@
       }
     });
 
-    // crosshair on K-line — only redraw the chart for smooth hover
+    // ---- crosshair (pointer events: mouse / touch / pen) ----
     const chartEl = $("#chart");
+
+    const designSize = () => {
+      const rect = chartEl.getBoundingClientRect();
+      const k = chartEl.__kchart;
+      const designW = (k && k.cssW) || chartEl.clientWidth || rect.width;
+      const designH = (k && k.cssH) || parseFloat(chartEl.style.height) || rect.height;
+      return { rect, designW, designH };
+    };
+
+    const pointFromEvent = (e) => {
+      const { rect, designW, designH } = designSize();
+      if (!rect.width || !rect.height) return null;
+      const x = ((e.clientX - rect.left) * designW) / rect.width;
+      const y = ((e.clientY - rect.top) * designH) / rect.height;
+      return { x, y, inside: x >= 0 && y >= 0 && x <= designW && y <= designH };
+    };
+
     const redrawChartOnly = () => {
       if (!state.engine) return;
       const barsVis = visibleBars();
@@ -787,37 +804,42 @@
         cross: state.cross,
       });
     };
-    chartEl.addEventListener("mousemove", (e) => {
+
+    const updateCrossFromEvent = (e, sticky) => {
       if (!state.engine) return;
-      const rect = chartEl.getBoundingClientRect();
-      state.cross = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      };
+      const pt = pointFromEvent(e);
+      if (!pt || !pt.inside) return;
+      state.cross = { x: pt.x, y: pt.y, sticky: !!sticky };
       redrawChartOnly();
+    };
+
+    chartEl.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "touch") chartEl.setPointerCapture(e.pointerId);
+      updateCrossFromEvent(e, e.pointerType !== "mouse");
     });
-    chartEl.addEventListener("mouseleave", () => {
-      if (!state.cross) return;
-      state.cross = null;
-      redrawChartOnly();
+    chartEl.addEventListener("pointermove", (e) => {
+      // mouse: hover; touch/pen: drag
+      updateCrossFromEvent(e, e.pointerType !== "mouse");
+    });
+    chartEl.addEventListener("pointerup", (e) => {
+      // keep crosshair sticky for touch so it stays after finger up
+      if (e.pointerType !== "mouse") updateCrossFromEvent(e, true);
+    });
+    chartEl.addEventListener("pointerleave", (e) => {
+      // mouse leaves → clear; touch capture ends → keep sticky
+      if (e.pointerType === "mouse" && state.cross) {
+        state.cross = null;
+        redrawChartOnly();
+      }
     });
     chartEl.addEventListener(
       "touchmove",
       (e) => {
-        if (!state.engine || !e.touches[0]) return;
-        const rect = chartEl.getBoundingClientRect();
-        state.cross = {
-          x: e.touches[0].clientX - rect.left,
-          y: e.touches[0].clientY - rect.top,
-        };
-        redrawChartOnly();
+        // stop page scroll while dragging on chart
+        if (e.cancelable) e.preventDefault();
       },
-      { passive: true }
+      { passive: false }
     );
-    chartEl.addEventListener("touchend", () => {
-      state.cross = null;
-      redrawChartOnly();
-    });
 
     // redraw charts on resize
     let resizeT;

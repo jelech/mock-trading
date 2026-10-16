@@ -372,83 +372,85 @@
       );
       const cx = xAt(idx);
       const b = bars[idx];
+      const inPrice = cross.y >= padT && cross.y <= padT + priceH;
+      const inVol = cross.y > volTop && cross.y <= volTop + volH;
 
-      // vertical line
-      ctx.strokeStyle = COLORS.cross;
-      ctx.setLineDash([3, 3]);
+      // vertical line (full plot height)
+      ctx.strokeStyle = "rgba(34,211,238,0.75)";
+      ctx.setLineDash([4, 3]);
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(cx, padT);
       ctx.lineTo(cx, cssH - padB);
       ctx.stroke();
 
-      // horizontal line in price area
-      if (cross.y >= padT && cross.y <= padT + priceH) {
-        const price = yPriceFromY(cross.y);
+      // horizontal line
+      if (inPrice || inVol) {
         ctx.beginPath();
         ctx.moveTo(padL, cross.y);
         ctx.lineTo(cssW - padR, cross.y);
         ctx.stroke();
-        // price label
-        ctx.setLineDash([]);
+      }
+
+      // axis labels
+      ctx.setLineDash([]);
+      ctx.font = `${isNarrow ? 10 : 11}px ui-monospace, Menlo, monospace`;
+      if (inPrice) {
+        const price = yPriceFromY(cross.y);
         const pl = price.toFixed(2);
         const pw = ctx.measureText(pl).width + 10;
-        ctx.fillStyle = COLORS.crossLabelBg;
+        ctx.fillStyle = "#22d3ee";
         ctx.fillRect(cssW - padR + 2, cross.y - 10, pw, 20);
-        ctx.fillStyle = COLORS.eq;
+        ctx.fillStyle = "#0b0f14";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(pl, cssW - padR + 7, cross.y);
       }
+      if (inVol) {
+        const vol = volFromY(cross.y);
+        const vl = fmtVol(vol);
+        const vw = ctx.measureText(vl).width + 10;
+        ctx.fillStyle = "#22d3ee";
+        ctx.fillRect(cssW - padR + 2, cross.y - 10, vw, 20);
+        ctx.fillStyle = "#0b0f14";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(vl, cssW - padR + 7, cross.y);
+      }
 
-      // volume label when hovering volume area
-      let volText = null;
-      if (cross.y > volTop && cross.y <= volTop + volH) {
-        volText = volFromY(cross.y);
-      }
-      ctx.setLineDash([]);
-
-      // tooltip box
-      const lines = [
-        b.d,
-        `开 ${b.o.toFixed(2)}  高 ${b.h.toFixed(2)}`,
-        `低 ${b.l.toFixed(2)}  收 ${b.c.toFixed(2)}`,
-        `量 ${fmtVol(b.v)}`,
-      ];
-      if (volText != null) {
-        lines.push(`游标量 ${fmtVol(volText)}`);
-      }
-      if (cross.y >= padT && cross.y <= padT + priceH) {
-        lines.push(`游标价 ${yPriceFromY(cross.y).toFixed(2)}`);
-      }
+      // tooltip — always include this bar's OHLCV
+      const lines = [b.d, `开 ${b.o.toFixed(2)}  高 ${b.h.toFixed(2)}`, `低 ${b.l.toFixed(2)}  收 ${b.c.toFixed(2)}`];
+      // emphasize volume
+      lines.push(`量 ${fmtVol(b.v)}`);
+      if (inPrice) lines.push(`游标价 ${yPriceFromY(cross.y).toFixed(2)}`);
+      if (inVol) lines.push(`游标量 ${fmtVol(volFromY(cross.y))}`);
 
       const pad = 10;
-      ctx.font = `${isNarrow ? 10 : 11}px ui-monospace, Menlo, monospace`;
       let textW = 0;
       for (const line of lines) {
         textW = Math.max(textW, ctx.measureText(line).width);
       }
       const boxW = textW + pad * 2;
       const boxH = lines.length * 16 + pad * 2 - 4;
-      let bx = cx + 12;
+      let bx = cx + 14;
       let by = padT + 8;
-      if (bx + boxW > cssW - 4) bx = cx - boxW - 12;
+      if (bx + boxW > cssW - 4) bx = cx - boxW - 14;
       if (bx < 4) bx = 4;
-      if (by + boxH > cssH - 4) by = cssH - boxH - 4;
+      if (by + boxH > cssH - 4) by = Math.max(4, cssH - boxH - 4);
 
-      ctx.fillStyle = "rgba(10,15,20,0.92)";
-      ctx.strokeStyle = "rgba(34,211,238,0.35)";
+      ctx.fillStyle = "rgba(10,15,20,0.94)";
+      ctx.strokeStyle = "rgba(34,211,238,0.55)";
       ctx.lineWidth = 1;
       roundRect(ctx, bx, by, boxW, boxH, 6);
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle = "#e6edf3";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       lines.forEach((line, i) => {
         if (i === 0) ctx.fillStyle = "#22d3ee";
-        else if (i === 3) ctx.fillStyle = "#a8b8c8";
+        else if (i === 3) ctx.fillStyle = "#fbbf24"; // volume line
+        else if (i >= 4) ctx.fillStyle = "#a8b8c8";
         else ctx.fillStyle = "#e6edf3";
         ctx.fillText(line, bx + pad, by + pad - 2 + i * 16);
       });
@@ -471,6 +473,8 @@
       slot,
       n,
       bars,
+      cssW,
+      cssH,
     };
   }
 

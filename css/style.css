@@ -137,7 +137,9 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
 
 #chart {
   cursor: crosshair;
-  touch-action: pan-y;
+  touch-action: none; /* 十字线拖动时不滚页面 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .mode-list { display: grid; gap: 8px; margin-bottom: 18px; }
