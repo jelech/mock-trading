@@ -89,6 +89,38 @@
     const dayIndex = new Map();
     for (let i = 0; i < bars.length; i++) dayIndex.set(bars[i].d, i);
 
+    // Semi-transparent boxes for completed buy→sell operations
+    const zones = buildTradeZones(trades);
+    for (const z of zones) {
+      const i0 = dayIndex.get(z.fromDay);
+      const i1 = dayIndex.get(z.toDay);
+      if (i0 == null || i1 == null) continue;
+      const xa = xAt(Math.min(i0, i1));
+      const xb = xAt(Math.max(i0, i1));
+      const y1 = yAt(z.priceHigh);
+      const y2 = yAt(z.priceLow);
+      const top = Math.min(y1, y2);
+      const bot = Math.max(y1, y2);
+      const profit = z.pct >= 0;
+      ctx.fillStyle = profit ? "rgba(246,70,93,0.12)" : "rgba(46,189,133,0.12)";
+      ctx.strokeStyle = profit ? "rgba(246,70,93,0.45)" : "rgba(46,189,133,0.45)";
+      ctx.lineWidth = 1;
+      ctx.fillRect(xa - 6, top - 4, (xb - xa) + 12, (bot - top) + 8);
+      ctx.strokeRect(xa - 6, top - 4, (xb - xa) + 12, (bot - top) + 8);
+
+      const label = `${z.pct >= 0 ? "+" : ""}${z.pct.toFixed(1)}%`;
+      ctx.font = "bold 11px sans-serif";
+      const tw = ctx.measureText(label).width;
+      const lx = (xa + xb) / 2 - tw / 2 - 6;
+      const ly = top - 22;
+      ctx.fillStyle = profit ? "rgba(246,70,93,0.92)" : "rgba(46,189,133,0.92)";
+      ctx.fillRect(lx, ly, tw + 12, 18);
+      ctx.fillStyle = "#0b0f14";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, lx + 6, ly + 9);
+    }
+
     for (const t of trades) {
       const i = dayIndex.get(t.day);
       if (i == null) continue;
@@ -145,11 +177,52 @@
     }
   }
 
+  /** Pair FIFO buys with sells → completed operation zones with return % */
+  function buildTradeZones(trades) {
+    const zones = [];
+    const open = [];
+    for (const t of trades) {
+      if (t.side === "buy") {
+        open.push({ day: t.day, price: t.price, qty: t.qty });
+        continue;
+      }
+      let remaining = t.qty;
+      let cost = 0;
+      let firstDay = null;
+      let priceHigh = t.price;
+      let priceLow = t.price;
+      while (remaining > 0 && open.length) {
+        const lot = open[0];
+        const take = Math.min(lot.qty, remaining);
+        cost += take * lot.price;
+        if (!firstDay) firstDay = lot.day;
+        priceHigh = Math.max(priceHigh, lot.price);
+        priceLow = Math.min(priceLow, lot.price);
+        lot.qty -= take;
+        remaining -= take;
+        if (lot.qty <= 0) open.shift();
+      }
+      if (cost > 0 && firstDay) {
+        const proceeds = t.qty * t.price;
+        const pct = ((proceeds - cost) / cost) * 100;
+        zones.push({
+          fromDay: firstDay,
+          toDay: t.day,
+          pct,
+          priceHigh,
+          priceLow,
+        });
+      }
+    }
+    return zones;
+  }
+
   function drawKline(canvas, bars, opts = {}) {
     const showMA = opts.showMA !== false;
     const showBOLL = !!opts.showBOLL;
     const trades = opts.trades || [];
     const cross = opts.cross || null; // {x, y} in css pixels, or null
+    const hideDates = !!opts.hideDates;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = canvas.clientWidth || canvas.width;
     const isNarrow = cssW < 480;
@@ -334,13 +407,15 @@
     // trade marks
     drawTradeMarks(ctx, bars, trades, L, yAt, xAt);
 
-    // x labels
-    ctx.fillStyle = COLORS.axis;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    const step = Math.max(1, Math.floor(n / (isNarrow ? 4 : 6)));
-    for (let i = 0; i < n; i += step) {
-      ctx.fillText(bars[i].d.slice(5), xAt(i), cssH - padB + 3);
+    // x labels (hidden while playing so the date doesn’t leak)
+    if (!hideDates) {
+      ctx.fillStyle = COLORS.axis;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      const step = Math.max(1, Math.floor(n / (isNarrow ? 4 : 6)));
+      for (let i = 0; i < n; i += step) {
+        ctx.fillText(bars[i].d.slice(5), xAt(i), cssH - padB + 3);
+      }
     }
 
     // last price line
@@ -419,7 +494,11 @@
       }
 
       // tooltip — always include this bar's OHLCV
-      const lines = [b.d, `开 ${b.o.toFixed(2)}  高 ${b.h.toFixed(2)}`, `低 ${b.l.toFixed(2)}  收 ${b.c.toFixed(2)}`];
+      const lines = [
+        hideDates ? `第 ${idx + 1} 根` : b.d,
+        `开 ${b.o.toFixed(2)}  高 ${b.h.toFixed(2)}`,
+        `低 ${b.l.toFixed(2)}  收 ${b.c.toFixed(2)}`,
+      ];
       // emphasize volume
       lines.push(`量 ${fmtVol(b.v)}`);
       if (inPrice) lines.push(`游标价 ${yPriceFromY(cross.y).toFixed(2)}`);
@@ -515,31 +594,48 @@
       ctx.fillText(label, 6, 4);
     }
 
-    if (!points || points.length < 2) {
+    // Filter points but keep original indices so time axis can stay aligned
+    const indexed = [];
+    for (let i = 0; i < points.length; i++) {
+      if (points[i] == null || Number.isNaN(points[i])) continue;
+      indexed.push({ i, v: points[i] });
+    }
+    if (indexed.length < 2) {
       ctx.fillStyle = COLORS.axis;
       ctx.font = "11px sans-serif";
       ctx.fillText("暂无数据", 8, cssH / 2);
       return;
     }
 
-    let min = Infinity;
-    let max = -Infinity;
-    for (const p of points) {
-      min = Math.min(min, p);
-      max = Math.max(max, p);
-    }
-    const pad = (max - min) * 0.12 || 1;
-    min -= pad;
-    max += pad;
-
-    const padL = 6;
-    const padR = 6;
+    // Optional time-axis alignment with the K-line chart
+    const n = opts.n || points.length;
+    const padL = opts.padL != null ? opts.padL : 6;
+    const padR = opts.padR != null ? opts.padR : 6;
     const padT = opts.label ? 16 : 8;
     const padB = 8;
-    const w = cssW - padL - padR;
-    const h = cssH - padT - padB;
+    const cssW2 = cssW;
+    const plotW = cssW2 - padL - padR;
+    const slot = n > 0 ? plotW / n : plotW;
+    // Match kline: xAt(i) = padL + slot*i + slot/2
+    const xAt = (i) =>
+      opts.alignToKline
+        ? padL + slot * i + slot / 2
+        : padL + (i / Math.max(1, points.length - 1)) * plotW;
 
-    const xAt = (i) => padL + (i / (points.length - 1)) * w;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const p of indexed) {
+      min = Math.min(min, p.v);
+      max = Math.max(max, p.v);
+    }
+    if (opts.baseline != null) {
+      min = Math.min(min, opts.baseline);
+      max = Math.max(max, opts.baseline);
+    }
+    const pad = (max - min) * 0.12 || Math.max(1, Math.abs(max) * 0.002);
+    min -= pad;
+    max += pad;
+    const h = cssH - padT - padB;
     const yAt = (v) => padT + ((max - v) / (max - min)) * h;
 
     if (opts.baseline != null) {
@@ -553,21 +649,80 @@
       ctx.setLineDash([]);
     }
 
+    // fill + stroke using original indices (gaps OK — move to next segment)
     ctx.beginPath();
-    ctx.moveTo(xAt(0), yAt(points[0]));
-    for (let i = 1; i < points.length; i++) ctx.lineTo(xAt(i), yAt(points[i]));
-    ctx.lineTo(xAt(points.length - 1), cssH - padB);
-    ctx.lineTo(xAt(0), cssH - padB);
+    let started = false;
+    for (const p of indexed) {
+      const x = xAt(p.i);
+      const y = yAt(p.v);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    const last = indexed[indexed.length - 1];
+    const first = indexed[0];
+    ctx.lineTo(xAt(last.i), cssH - padB);
+    ctx.lineTo(xAt(first.i), cssH - padB);
     ctx.closePath();
     ctx.fillStyle = opts.fill || COLORS.eqFill;
     ctx.fill();
 
     ctx.beginPath();
-    ctx.moveTo(xAt(0), yAt(points[0]));
-    for (let i = 1; i < points.length; i++) ctx.lineTo(xAt(i), yAt(points[i]));
+    started = false;
+    for (const p of indexed) {
+      const x = xAt(p.i);
+      const y = yAt(p.v);
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
     ctx.strokeStyle = opts.color || COLORS.eq;
     ctx.lineWidth = 1.6;
     ctx.stroke();
+
+    // hover / shared crosshair
+    const cross = opts.cross || null;
+    if (cross && cross.x >= padL && cross.x <= cssW - padR) {
+      const idx = opts.alignToKline
+        ? Math.min(n - 1, Math.max(0, Math.floor((cross.x - padL) / slot)))
+        : Math.min(
+            points.length - 1,
+            Math.max(0, Math.round(((cross.x - padL) / plotW) * (points.length - 1)))
+          );
+      const v = points[idx];
+      const cx = xAt(idx);
+      ctx.strokeStyle = COLORS.cross;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, padT);
+      ctx.lineTo(cx, cssH - padB);
+      ctx.stroke();
+
+      if (v != null && !Number.isNaN(v)) {
+        const cy = yAt(v);
+        ctx.fillStyle = opts.color || COLORS.eq;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        const text = (opts.fmtValue || ((x) => x.toFixed(2)))(v);
+        ctx.font = "11px ui-monospace, Menlo, monospace";
+        const tw = ctx.measureText(text).width;
+        let bx = cx + 8;
+        if (bx + tw + 10 > cssW - padR) bx = cx - tw - 16;
+        ctx.fillStyle = COLORS.crossLabelBg;
+        ctx.fillRect(bx, cy - 10, tw + 10, 20);
+        ctx.fillStyle = "#e6edf3";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, bx + 5, cy);
+      }
+    }
   }
 
   function drawEquity(canvas, points, initial, opts = {}) {
@@ -577,13 +732,26 @@
       label: opts.label || "净值曲线",
       color: COLORS.eq,
       fill: COLORS.eqFill,
+      n: opts.n,
+      padL: opts.padL,
+      padR: opts.padR,
+      alignToKline: opts.alignToKline !== false,
+      cross: opts.cross,
+      fmtValue:
+        opts.fmtValue ||
+        ((v) =>
+          v.toLocaleString("zh-CN", {
+            maximumFractionDigits: 0,
+          })),
     });
+    canvas.__eqchart = { n: opts.n || points.length };
   }
 
   global.KChart = {
     drawKline,
     drawEquity,
     drawLineStrip,
+    buildTradeZones,
     sma,
     bollinger,
     COLORS,

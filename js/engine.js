@@ -19,6 +19,8 @@
       this.dayTrades = 0;
       this.currentDay = null;
       this.equityCurve = [opts.initialCash];
+      /** @type {Map<string, number>} day → mark-to-market equity */
+      this.dayEquity = new Map();
     }
 
     get shares() {
@@ -143,8 +145,10 @@
       return commission + stamp;
     }
 
-    markEquity(price) {
-      this.equityCurve.push(this.equity(price));
+    markEquity(price, day) {
+      const v = this.equity(price);
+      this.equityCurve.push(v);
+      if (day) this.dayEquity.set(day, v);
     }
 
     /** Snapshot for undo (simple deep copy) */
@@ -158,6 +162,7 @@
           dayTrades: this.dayTrades,
           currentDay: this.currentDay,
           equityCurve: this.equityCurve,
+          dayEquity: Array.from(this.dayEquity.entries()),
         })
       );
     }
@@ -170,6 +175,7 @@
       this.dayTrades = snap.dayTrades;
       this.currentDay = snap.currentDay;
       this.equityCurve = snap.equityCurve;
+      this.dayEquity = new Map(snap.dayEquity || []);
     }
   }
 

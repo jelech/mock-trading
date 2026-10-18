@@ -382,6 +382,8 @@
     state.challengeSeed = encodeSeed(stock.code, startIdx, days);
     // keep days in state so result text matches the actual window
     state.days = days;
+    // day-1 mark so the equity curve has a point on the first bar
+    state.engine.markEquity(currentBar().c, currentBar().d);
 
     // 对局中始终隐藏标的，只在结算/揭晓时显示
     $("#g-stock-name").textContent = "神秘标的";
@@ -431,10 +433,23 @@
 
     $("#g-day").textContent = String(challengeDayNumber());
     const dateEl = $("#g-date");
-    const regimeTag = state.windowRegime
-      ? ` · ${REGIME_LABEL[state.windowRegime] || state.windowRegime}`
-      : "";
-    dateEl.textContent = bar.d + regimeTag;
+    if (dateEl) {
+      // Random regime: don't reveal bull/bear. Date hidden while playing.
+      if (state.finished) {
+        dateEl.classList.remove("hidden");
+        const regimeTag =
+          state.regime !== "random" && state.windowRegime
+            ? ` · ${REGIME_LABEL[state.windowRegime] || ""}`
+            : "";
+        dateEl.textContent = bar.d + regimeTag;
+      } else if (state.regime !== "random" && state.windowRegime) {
+        dateEl.classList.remove("hidden");
+        dateEl.textContent = REGIME_LABEL[state.windowRegime] || "";
+      } else {
+        dateEl.textContent = "";
+        dateEl.classList.add("hidden");
+      }
+    }
     $("#t-price").textContent = bar.c.toFixed(2);
 
     const chg = ((bar.c - prev.c) / prev.c) * 100;
@@ -488,13 +503,31 @@
       showBOLL: state.indicator === "boll",
       trades: tradesVis,
       cross: state.cross,
+      hideDates: !state.finished,
     });
-    // live equity series: keep daily marks but pin the last point to current MTM
-    const eqSeries = eng.equityCurve.slice();
+    // live equity series aligned to the visible K-line time axis
+    const eqValues = new Array(barsVis.length).fill(null);
+    const dayIdx = new Map();
+    for (let i = 0; i < barsVis.length; i++) dayIdx.set(barsVis[i].d, i);
+    for (const [d, v] of eng.dayEquity) {
+      const i = dayIdx.get(d);
+      if (i != null) eqValues[i] = v;
+    }
+    // pin the current bar to live MTM
+    const curIdx = dayIdx.get(bar.d);
     const curEq = eng.equity(bar.c);
-    if (eqSeries.length < 2) eqSeries.push(curEq);
-    else eqSeries[eqSeries.length - 1] = curEq;
-    KChart.drawEquity($("#equity-chart"), eqSeries, eng.initialCash);
+    if (curIdx != null) eqValues[curIdx] = curEq;
+
+    const chartEl = $("#chart");
+    const k = chartEl && chartEl.__kchart;
+    KChart.drawEquity($("#equity-chart"), eqValues, eng.initialCash, {
+      n: barsVis.length,
+      padL: k ? k.padL : undefined,
+      padR: k ? k.padR : undefined,
+      alignToKline: true,
+      cross: state.cross,
+      fmtValue: (v) => fmtMoney(v),
+    });
     renderIndexStrip(barsVis);
     updateIndLegend(barsVis);
 
@@ -523,6 +556,12 @@
       label: state.indexName,
       color: KChart.COLORS.idx,
       fill: KChart.COLORS.idxFill,
+      n: barsVis.length,
+      padL: 56,
+      padR: 56,
+      alignToKline: true,
+      cross: state.cross,
+      fmtValue: (v) => v.toFixed(2),
     });
 
     if (series.length >= 1) {
@@ -606,6 +645,11 @@
     }
     box.className = "trade-log";
     // newest first in flex-column-reverse => append chronological
+    const dayLabel = (day) => {
+      if (state.finished) return day;
+      const i = state.bars.findIndex((b) => b.d === day);
+      return i >= 0 ? `第${i - state.startIdx + 1}日` : "—";
+    };
     box.innerHTML = trades
       .map((t) => {
         const sideCls = t.side === "buy" ? "buy" : "sell";
@@ -615,7 +659,7 @@
             ? ` 盈亏 ${t.pnl >= 0 ? "+" : ""}${t.pnl.toFixed(0)}`
             : "";
         return `<div class="log-row ${sideCls}">
-          <span class="muted">${t.day}</span>
+          <span class="muted">${dayLabel(t.day)}</span>
           <span class="side-tag">${sideTxt}</span>
           <span>${t.qty} 股</span>
           <span>@ ${t.price.toFixed(2)}</span>
@@ -661,7 +705,7 @@
     pushSnapshot();
     state.cursor += 1;
     state.engine.beginDay(currentBar().d);
-    state.engine.markEquity(currentBar().c);
+    state.engine.markEquity(currentBar().c, currentBar().d);
     if (state.mode === "speed") resetSpeedClock();
     renderGame();
     if (state.cursor >= state.endIdx) endGame();
@@ -695,6 +739,7 @@
       renderHint(result.error, "err");
       return;
     }
+    state.engine.markEquity(bar.c, bar.d);
     renderHint(`买入 ${qty} 股 @ ${bar.c.toFixed(2)}`, "ok");
     renderGame();
   }
@@ -714,6 +759,7 @@
       renderHint(result.error, "err");
       return;
     }
+    state.engine.markEquity(bar.c, bar.d);
     renderHint(
       `卖出 ${qty} 股 @ ${bar.c.toFixed(2)}，盈亏 ${result.trade.pnl >= 0 ? "+" : ""}${result.trade.pnl.toFixed(0)}`,
       "ok"
@@ -824,9 +870,10 @@
     const displayCode = stock ? stock.code : "";
     $("#r-title").textContent =
       result.score >= 8 ? "操作漂亮！" : result.score >= 2 ? "稳中有进" : "继续磨练";
-    const regimeTxt = state.windowRegime
-      ? ` · ${REGIME_LABEL[state.windowRegime] || ""}`
-      : "";
+    const regimeTxt =
+      state.regime !== "random" && state.windowRegime
+        ? ` · ${REGIME_LABEL[state.windowRegime] || ""}`
+        : "";
     $("#r-subtitle").textContent = state.blind
       ? `揭晓：${displayName}（${displayCode}） · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日${regimeTxt}`
       : `${displayName} · ${MODE_LABEL[state.mode]} · ${challengeDayNumber()} 个交易日${regimeTxt}`;
@@ -909,7 +956,7 @@
         eng.trades[eng.trades.length - 1].note = "期末清仓";
       }
     }
-    state.engine.markEquity(lastBar.c);
+    state.engine.markEquity(lastBar.c, lastBar.d);
 
     const result = Scoring.scoreGame({
       equityCurve: state.engine.equityCurve,
@@ -1182,8 +1229,31 @@
         showBOLL: state.indicator === "boll",
         trades: tradesVis,
         cross: state.cross,
+        hideDates: !state.finished,
       });
       updateIndLegend(barsVis);
+      // equity strip follows the same time axis + crosshair
+      const bar = currentBar();
+      const eqValues = new Array(barsVis.length).fill(null);
+      const dayIdx = new Map();
+      for (let i = 0; i < barsVis.length; i++) dayIdx.set(barsVis[i].d, i);
+      for (const [d, v] of state.engine.dayEquity) {
+        const i = dayIdx.get(d);
+        if (i != null) eqValues[i] = v;
+      }
+      if (bar) {
+        const curIdx = dayIdx.get(bar.d);
+        if (curIdx != null) eqValues[curIdx] = state.engine.equity(bar.c);
+      }
+      const k = chartEl.__kchart;
+      KChart.drawEquity($("#equity-chart"), eqValues, state.engine.initialCash, {
+        n: barsVis.length,
+        padL: k ? k.padL : undefined,
+        padR: k ? k.padR : undefined,
+        alignToKline: true,
+        cross: state.cross,
+        fmtValue: (v) => fmtMoney(v),
+      });
     };
 
     const updateCrossFromEvent = (e, sticky) => {
@@ -1221,6 +1291,34 @@
       },
       { passive: false }
     );
+
+    // Equity strip: hover shows the value on the shared time axis
+    const equityEl = $("#equity-chart");
+    if (equityEl) {
+      const eqPoint = (e) => {
+        const { rect, designW } = designSize();
+        if (!rect.width) return null;
+        // equity canvas shares the same horizontal layout as the kline
+        const eqRect = equityEl.getBoundingClientRect();
+        const x = ((e.clientX - eqRect.left) * designW) / eqRect.width;
+        return { x, y: 0, inside: x >= 0 && x <= designW };
+      };
+      const eqUpdate = (e, sticky) => {
+        if (!state.engine) return;
+        const pt = eqPoint(e);
+        if (!pt || !pt.inside) return;
+        state.cross = { x: pt.x, y: pt.y, sticky: !!sticky };
+        redrawChartOnly();
+      };
+      equityEl.addEventListener("pointermove", (e) => eqUpdate(e, e.pointerType !== "mouse"));
+      equityEl.addEventListener("pointerdown", (e) => eqUpdate(e, true));
+      equityEl.addEventListener("pointerleave", () => {
+        if (state.cross && !state.cross.sticky) {
+          state.cross = null;
+          redrawChartOnly();
+        }
+      });
+    }
 
     // redraw charts on resize
     let resizeT;
