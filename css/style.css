@@ -198,6 +198,36 @@ button { cursor: pointer; border: none; background: none; color: inherit; }
   color: var(--ink-2);
 }
 
+.seed-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.seed-row input {
+  flex: 1;
+  min-width: 160px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.seed-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.seed-btn {
+  font-family: var(--mono);
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+.seed-btn #g-seed {
+  color: var(--accent);
+  margin-left: 4px;
+}
+
 .regime-group { margin-top: 4px; }
 .regime-group .chip[data-value="bull"].selected {
   border-color: var(--up);

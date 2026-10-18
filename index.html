@@ -62,6 +62,15 @@
             <label>标的抽取</label>
             <p class="field-desc">每局从热门池随机抽取，对局中隐藏名称与代码，结束后揭晓。</p>
           </div>
+
+          <div class="field-row">
+            <label>挑战种子</label>
+            <div class="seed-row">
+              <input id="seed-input" type="text" placeholder="粘贴种子，玩同一段 K 线" spellcheck="false" autocomplete="off" />
+              <button id="btn-seed-start" class="btn-primary sm">用种子开局</button>
+            </div>
+            <p class="field-desc">对方分享的种子可复现同一标的、同一区间；种子已混淆，不会直接暴露股票代码。开局后可复制。</p>
+          </div>
         </div>
 
         <div class="panel">
@@ -118,6 +127,9 @@
             <span class="muted">日</span>
           </div>
           <div id="g-date" class="muted">—</div>
+          <button id="btn-seed" class="btn-ghost sm seed-btn" title="复制挑战种子">
+            种子 <span id="g-seed">—</span>
+          </button>
         </div>
         <div class="top-right">
           <div class="equity-block">
@@ -270,6 +282,14 @@
             <div id="r-index" class="metric-val">—</div>
           </div>
           <div class="metric">
+            <div class="muted">个股区间</div>
+            <div id="r-stock" class="metric-val">—</div>
+          </div>
+          <div class="metric">
+            <div class="muted">跑赢个股</div>
+            <div id="r-beat" class="metric-val">—</div>
+          </div>
+          <div class="metric">
             <div class="muted">胜率</div>
             <div id="r-winrate" class="metric-val">—</div>
           </div>
@@ -306,6 +326,8 @@
         <li><strong>结束后回看：</strong>对局结束后不会强制退出，可继续回看 K 线与完整交易记录；仅禁用买卖等操作按钮。点「查看结算」看评分，点「回看操作」还能回到盘面。</li>
         <li><strong>行情环境：</strong>可选随机 / 牛市 / 熊市 / 震荡市，系统会匹配对应涨跌节奏的历史窗口。标的从热门池中自动抽取。</li>
         <li><strong>隐藏标的：</strong>每局随机抽标的，对局中只显示「神秘标的」，结束后揭晓名称与代码。</li>
+        <li><strong>挑战种子：</strong>开局后点顶部「种子」复制（已混淆，看不出股票代码），发给朋友粘贴开局，双方就是同一标的、同一段 K 线，可对照操作与得分。</li>
+        <li><strong>个股对照：</strong>除同期大盘外，还会统计该股区间的买入持有涨跌幅；跑赢个股会加分，跑输会扣分。</li>
         <li><strong>撤销：</strong>经典/闪电/马拉松模式下可撤销上一步（买单、卖单或推进一日）。限时模式不可撤销。</li>
       </ol>
       <button class="btn-primary modal-close">知道了</button>
@@ -334,9 +356,9 @@
     </div>
   </div>
 
-  <script src="js/chart.js?v=20261016d"></script>
-  <script src="js/engine.js?v=20261016d"></script>
-  <script src="js/scoring.js?v=20261016d"></script>
-  <script src="js/app.js?v=20261016d"></script>
+  <script src="js/chart.js?v=20261016f"></script>
+  <script src="js/engine.js?v=20261016f"></script>
+  <script src="js/scoring.js?v=20261016f"></script>
+  <script src="js/app.js?v=20261016f"></script>
 </body>
 </html>

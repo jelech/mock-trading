@@ -23,7 +23,7 @@
   /**
    * @returns {{returnPct:number, maxDd:number, winRate:number|null, tradeCount:number, score:number, grade:string, breakdown:string[]}}
    */
-  function scoreGame({ equityCurve, initialCash, trades }) {
+  function scoreGame({ equityCurve, initialCash, trades, stockReturnPct }) {
     const final = equityCurve[equityCurve.length - 1];
     const returnPct = ((final - initialCash) / initialCash) * 100;
     const maxDd = maxDrawdown(equityCurve);
@@ -38,8 +38,19 @@
     const sellCount = trades.filter((t) => t.side === "sell").length;
     const activityBonus = Math.min(2, sellCount * 0.25);
 
+    // Beat buy-and-hold of the same stock over the challenge window
+    let alphaBonus = 0;
+    let alphaLine = null;
+    if (stockReturnPct != null && Number.isFinite(stockReturnPct)) {
+      const alpha = returnPct - stockReturnPct;
+      alphaBonus = Math.max(-3, Math.min(4, alpha * 0.12));
+      alphaLine = `跑赢个股 <code>${alpha >= 0 ? "+" : ""}${alpha.toFixed(2)}%</code>（个股区间 ${stockReturnPct >= 0 ? "+" : ""}${stockReturnPct.toFixed(2)}%）`;
+    }
+
     const score =
-      Math.round((returnPct - ddPenalty - tradePenalty + activityBonus) * 100) / 100;
+      Math.round(
+        (returnPct - ddPenalty - tradePenalty + activityBonus + alphaBonus) * 100
+      ) / 100;
 
     let grade = "C";
     if (score >= 15) grade = "S";
@@ -53,8 +64,13 @@
       `回撤惩罚 <code>−${ddPenalty.toFixed(2)}</code>（最大回撤 ${(maxDd * 100).toFixed(2)}%）`,
       `交易惩罚 <code>−${tradePenalty.toFixed(2)}</code>（${tradeCount} 笔，免罚额度 12 笔）`,
       `活跃奖励 <code>+${activityBonus.toFixed(2)}</code>（完成卖出 ${sellCount} 次）`,
-      `综合得分 <code>${score.toFixed(2)}</code>`,
     ];
+    if (alphaLine) {
+      breakdown.push(
+        `个股对照 <code>${alphaBonus >= 0 ? "+" : ""}${alphaBonus.toFixed(2)}</code>（${alphaLine}）`
+      );
+    }
+    breakdown.push(`综合得分 <code>${score.toFixed(2)}</code>`);
 
     return {
       returnPct,
@@ -64,6 +80,10 @@
       finalEquity: final,
       score,
       grade,
+      stockReturnPct: stockReturnPct == null ? null : stockReturnPct,
+      alphaPct:
+        stockReturnPct == null ? null : returnPct - stockReturnPct,
+      alphaBonus,
       breakdown,
     };
   }

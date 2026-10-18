@@ -149,7 +149,27 @@
       renderRegimeDesc();
     });
 
-    $("#btn-start").addEventListener("click", startGame);
+    $("#btn-start").addEventListener("click", () => startGame());
+    const seedStart = $("#btn-seed-start");
+    if (seedStart) {
+      seedStart.addEventListener("click", () => {
+        const raw = $("#seed-input") && $("#seed-input").value;
+        if (!raw || !String(raw).trim()) {
+          alert("请先粘贴挑战种子");
+          return;
+        }
+        startGame(raw);
+      });
+    }
+    const seedInput = $("#seed-input");
+    if (seedInput) {
+      seedInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (seedStart) seedStart.click();
+        }
+      });
+    }
     $("#btn-howto").addEventListener("click", () => openModal("modal-howto"));
     $("#btn-board").addEventListener("click", () => {
       renderBoard();
@@ -219,15 +239,124 @@
     return fallback;
   }
 
-  // ---------- game ----------
-  function startGame() {
-    const warmup = 25;
-    const totalDays = state.days;
-    const hit = resolveGameWindow(totalDays, warmup);
-    if (!hit) {
-      alert("未能匹配到合适的行情区间，试试换成「随机」或其他行情环境");
-      return;
+  // ---------- share seed ----------
+  // K2~<base64url> carries an obfuscated payload so the stock code is not
+  // readable from the token itself (old K1~CODE~START~DAYS still accepted).
+  const SEED_KEY = "kline-arena-2026";
+
+  function seedXor(text) {
+    let out = "";
+    for (let i = 0; i < text.length; i++) {
+      out += String.fromCharCode(
+        text.charCodeAt(i) ^ SEED_KEY.charCodeAt(i % SEED_KEY.length)
+      );
     }
+    return out;
+  }
+
+  function encodeSeed(code, startIdx, days) {
+    const text = `${code}|${startIdx}|${days}`;
+    const b64 = btoa(seedXor(text))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    return `K2~${b64}`;
+  }
+
+  function parseSeed(raw) {
+    if (!raw) return null;
+    const s = String(raw).trim();
+
+    // legacy plaintext
+    const legacy = s.match(/^K1~(.+?)~(\d+)~(\d+)$/i);
+    if (legacy) {
+      return {
+        code: legacy[1],
+        startIdx: parseInt(legacy[2], 10),
+        days: parseInt(legacy[3], 10),
+      };
+    }
+
+    const m = s.match(/^K2~([A-Za-z0-9_-]+)$/);
+    if (!m) return null;
+    try {
+      let b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (b64.length % 4) b64 += "=";
+      const text = seedXor(atob(b64));
+      const parts = text.split("|");
+      if (parts.length !== 3) return null;
+      const startIdx = parseInt(parts[1], 10);
+      const days = parseInt(parts[2], 10);
+      if (!parts[0] || !Number.isFinite(startIdx) || !Number.isFinite(days)) return null;
+      return { code: parts[0], startIdx, days };
+    } catch {
+      return null;
+    }
+  }
+
+  function resolveFromSeed(seed) {
+    const warmup = 25;
+    const stock = state.stocks.find((s) => s.code === seed.code);
+    if (!stock) return { error: `标的池里没有 ${seed.code}，请用同一份数据开局` };
+    const bars = stock.bars;
+    const { startIdx, days } = seed;
+    if (days < 5) return { error: "种子天数无效" };
+    if (startIdx < warmup) return { error: "种子起点太靠前，历史数据不足" };
+    if (startIdx + days > bars.length) return { error: "种子区间超出该标的数据范围" };
+    const label = classifyWindow(bars, startIdx, days);
+    return { stock, startIdx, days, label };
+  }
+
+  function copyText(text, okMsg) {
+    const done = () => renderHint(okMsg || "已复制", "ok");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    } else {
+      fallbackCopy(text, done);
+    }
+  }
+
+  function fallbackCopy(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      done();
+    } catch {
+      prompt("手动复制种子：", text);
+    }
+    document.body.removeChild(ta);
+  }
+
+  // ---------- game ----------
+  function startGame(fromSeed) {
+    const warmup = 25;
+    let hit = null;
+
+    if (fromSeed) {
+      const parsed = parseSeed(fromSeed);
+      if (!parsed) {
+        alert("种子格式不正确，请粘贴对方分享的挑战种子");
+        return;
+      }
+      const resolved = resolveFromSeed(parsed);
+      if (resolved.error) {
+        alert(resolved.error);
+        return;
+      }
+      hit = resolved;
+    } else {
+      hit = resolveGameWindow(state.days, warmup);
+      if (!hit) {
+        alert("未能匹配到合适的行情区间，试试换成「随机」或其他行情环境");
+        return;
+      }
+    }
+
     const stock = hit.stock;
     state.activeCode = stock.code;
 
@@ -250,11 +379,16 @@
     state.lastResult = null;
     state.cross = null;
     state.windowRegime = hit.label;
+    state.challengeSeed = encodeSeed(stock.code, startIdx, days);
+    // keep days in state so result text matches the actual window
+    state.days = days;
 
     // 对局中始终隐藏标的，只在结算/揭晓时显示
     $("#g-stock-name").textContent = "神秘标的";
     $("#g-stock-code").textContent = "结束后揭晓";
     $("#g-day-total").textContent = String(days);
+    const seedEl = $("#g-seed");
+    if (seedEl) seedEl.textContent = state.challengeSeed;
 
     // review banner / trade controls
     setReviewMode(false);
@@ -267,6 +401,7 @@
 
     renderGame();
     if (isSpeed) startSpeedClock();
+    renderHint("可点顶部「种子」复制，分享给朋友同场对比", "ok");
   }
 
   function currentBar() {
@@ -423,6 +558,14 @@
     const e = idxMap.get(endBar.d);
     if (s == null || e == null) return null;
     return ((e - s) / s) * 100;
+  }
+
+  /** Buy-and-hold return of the traded stock over the challenge window */
+  function stockReturnOverWindow() {
+    const startBar = state.bars[state.startIdx];
+    const endBar = state.bars[state.endIdx];
+    if (!startBar || !endBar || !startBar.c) return null;
+    return ((endBar.c / startBar.c) - 1) * 100;
   }
 
   function updateIndLegend(barsVis) {
@@ -697,6 +840,18 @@
       idxRet == null ? "—" : `${idxRet >= 0 ? "+" : ""}${idxRet.toFixed(2)}%`,
       idxRet
     );
+    const stockRet = result.stockReturnPct;
+    setMetric(
+      "#r-stock",
+      stockRet == null ? "—" : `${stockRet >= 0 ? "+" : ""}${stockRet.toFixed(2)}%`,
+      stockRet
+    );
+    const beat = result.alphaPct;
+    setMetric(
+      "#r-beat",
+      beat == null ? "—" : `${beat >= 0 ? "+" : ""}${beat.toFixed(2)}%`,
+      beat
+    );
     setMetric(
       "#r-winrate",
       result.winRate == null ? "—" : `${(result.winRate * 100).toFixed(0)}%`,
@@ -708,10 +863,18 @@
       idxRet == null
         ? ""
         : `<br/>相对大盘超额 <code>${(result.returnPct - idxRet >= 0 ? "+" : "")}${(result.returnPct - idxRet).toFixed(2)}%</code>`;
+    const vsStock =
+      result.alphaPct == null
+        ? ""
+        : `<br/>跑赢个股（买入持有） <code>${(result.alphaPct >= 0 ? "+" : "")}${result.alphaPct.toFixed(2)}%</code>`;
     $("#r-breakdown").innerHTML =
       result.breakdown.join("<br/>") +
       alpha +
-      `<br/>成交笔数 <code>${result.tradeCount}</code>（含期末清仓）`;
+      vsStock +
+      `<br/>成交笔数 <code>${result.tradeCount}</code>（含期末清仓）` +
+      (state.challengeSeed
+        ? `<br/>挑战种子 <code>${state.challengeSeed}</code>`
+        : "");
   }
 
   function enterReviewBanner(result) {
@@ -752,6 +915,7 @@
       equityCurve: state.engine.equityCurve,
       initialCash: state.engine.initialCash,
       trades: state.engine.trades,
+      stockReturnPct: stockReturnOverWindow(),
     });
     state.lastResult = result;
 
@@ -868,6 +1032,14 @@
     $("#btn-buy").addEventListener("click", doBuy);
     $("#btn-sell").addEventListener("click", doSell);
 
+    const seedBtn = $("#btn-seed");
+    if (seedBtn) {
+      seedBtn.addEventListener("click", () => {
+        if (!state.challengeSeed) return;
+        copyText(state.challengeSeed, `已复制种子 ${state.challengeSeed}`);
+      });
+    }
+
     // MA / BOLL toggle
     $$(".ind-chip").forEach((chip) => {
       chip.addEventListener("click", () => {
@@ -945,7 +1117,7 @@
       if (el) el.addEventListener("click", openSettle);
     });
     const againBtn = $("#btn-review-again");
-    if (againBtn) againBtn.addEventListener("click", startGame);
+    if (againBtn) againBtn.addEventListener("click", () => startGame());
     const exitBtn = $("#btn-review-exit");
     if (exitBtn) {
       exitBtn.addEventListener("click", () => {
